@@ -1,0 +1,9 @@
+../Core/Src/main.c:97:6:Control_Init	1
+../Core/Src/main.c:114:6:HAL_TIM_PeriodElapsedCallback	6
+../Core/Src/main.c:191:5:main	1
+../Core/Src/main.c:259:6:SystemClock_Config	3
+../Core/Src/main.c:308:13:MX_ADC1_Init	3
+../Core/Src/main.c:358:13:MX_TIM3_Init	6
+../Core/Src/main.c:417:13:MX_USART2_UART_Init	2
+../Core/Src/main.c:450:13:MX_GPIO_Init	1
+../Core/Src/main.c:490:6:Error_Handler	1
