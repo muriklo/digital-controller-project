@@ -60,8 +60,8 @@ all: main-build
 main-build: passa\ baixa_v1.0.elf secondary-outputs
 
 # Tool invocations
-passa\ baixa_v1.0.elf passa\ baixa_v1.0.map: $(OBJS) $(USER_OBJS) C:\Users\muril\Meu\ Drive\ (murilloribeiro2010@gmail.com)\IFSC\ xDrive\2025.1\Controle\ 2\stm32\passa\ baixa\STM32F411CEUX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "passa baixa_v1.0.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\muril\Meu Drive (murilloribeiro2010@gmail.com)\IFSC xDrive\2025.1\Controle 2\stm32\passa baixa\STM32F411CEUX_FLASH.ld" --specs=nosys.specs -Wl,-Map="passa baixa_v1.0.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
+passa\ baixa_v1.0.elf passa\ baixa_v1.0.map: $(OBJS) $(USER_OBJS) C:\Users\muril\Desktop\digital-controller-project\passa\ baixa\STM32F411CEUX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "passa baixa_v1.0.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\muril\Desktop\digital-controller-project\passa baixa\STM32F411CEUX_FLASH.ld" --specs=nosys.specs -Wl,-Map="passa baixa_v1.0.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
