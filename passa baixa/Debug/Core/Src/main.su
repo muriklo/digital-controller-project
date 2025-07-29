@@ -1,8 +1,8 @@
-../Core/Src/main.c:133:6:Control_Init	4	static
-../Core/Src/main.c:164:6:HAL_TIM_PeriodElapsedCallback	32	static
-../Core/Src/main.c:279:5:main	8	static
-../Core/Src/main.c:346:6:SystemClock_Config	88	static
-../Core/Src/main.c:393:13:MX_ADC1_Init	24	static
-../Core/Src/main.c:442:13:MX_TIM3_Init	64	static
-../Core/Src/main.c:498:13:MX_GPIO_Init	32	static
-../Core/Src/main.c:528:6:Error_Handler	4	static
+../Core/Src/main.c:126:6:Control_Init	4	static
+../Core/Src/main.c:157:6:HAL_TIM_PeriodElapsedCallback	24	static
+../Core/Src/main.c:246:5:main	8	static
+../Core/Src/main.c:313:6:SystemClock_Config	88	static
+../Core/Src/main.c:362:13:MX_ADC1_Init	24	static
+../Core/Src/main.c:412:13:MX_TIM3_Init	64	static
+../Core/Src/main.c:471:13:MX_GPIO_Init	32	static
+../Core/Src/main.c:503:6:Error_Handler	4	static
