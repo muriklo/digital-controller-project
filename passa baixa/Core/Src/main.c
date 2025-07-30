@@ -57,7 +57,7 @@ const float B[2] =
 { 0.0f, 1.7761e-3f };
 
 const float Ke[2] =
-{ 2.58476222f, 82874.6144f };
+{ 1.4719e2f, 2.9176e-3f };
 
 const float Ki = 9045.3275f; // valor do integrador, calculado no MATLAB
 
@@ -87,10 +87,14 @@ static float x2_obs_k_1 = 0.0f;
 // Derivadas dos estados estimados (usadas na integração Euler)
 static float x1_obs_pt = 0.0f;
 static float x2_obs_pt = 0.0f;
+static float x1_pt;
+static float x2_pt;
 
 // Saída estimada do observador
 static float y_obs_k = 0.0f;
 float erro_obs;
+float zeta;
+float zeta_pt;
 
 // Valor da entrada (u) da planta no instante anterior (para o observador)
 static float u_k_1 = 0.0f;
@@ -130,8 +134,12 @@ void Control_Init(void)
 	g_output_y = 0.0f;
 	g_control_u = 0.0f;
 	u_k_1 = 0.0f; // Inicializa a ação de controle anterior
+	zeta = 0.0f;
+	zeta_pt = 0.0f;
 
 	// Variáveis de estado estimadas do observador
+	x1_pt = 0.0f;
+	x2_pt = 0.0f;
 	x1_obs_k = 0.0f;
 	x2_obs_k = 0.0f;
 	x1_obs_k_1 = 0.0f;
@@ -194,28 +202,30 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	// --- PASSO 3: C�?LCULO DO CONTROLADOR ---
 	//HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6); // pino para calcular tempo de execução dos cálculos
 
+	zeta += T_SAMPLE * zeta_pt;
 
-	x_integrador += T_SAMPLE * erro_inst;
-
-	erro_inst = (r_k - y_medido);
+	x1_obs_k += T_SAMPLE * x1_pt;
+	x2_obs_k += T_SAMPLE * x2_pt;
 
 	y_obs_k = x1_obs_k;
 
-	x1_obs_k += T_SAMPLE * x1_obs_pt;
-	x2_obs_k += T_SAMPLE * x2_obs_pt;
+	x1_pt = A[0] * x1_obs_k + A[1] * x2_obs_k + B[0] * g_control_u;
+	x2_pt = A[2] * x1_obs_k + A[3] * x2_obs_k + B[1] * g_control_u;
+
+	erro_inst = y_medido - y_obs_k;
+
+	g_control_u = -(Kc[0] * x1_obs_k + Kc[1] * x2_obs_k) + Ki * zeta;
+
+	x1_obs_pt = A[0] * x1_obs_k + A[1] * x2_obs_k + B[0] * g_control_u + Ke[0] * erro_inst;
+	x2_obs_pt = A[2] * x1_obs_k + A[3] * x2_obs_k + B[1] * g_control_u + Ke[1] * erro_inst;
 
 
+	zeta_pt = r_k - y_obs_k;
 
-	erro_obs = y_medido - y_obs_k;
-
-	g_control_u = -(Kc[0] * x1_obs_k + Kc[1] * x2_obs_k) + Ki * x_integrador;
 
 	u_k_1 = g_control_u;
 
-	x1_obs_pt = A[0] * x1_obs_k + A[1] * x2_obs_k + B[0] * u_k_1
-			+ Ke[0] * erro_obs;
-	x2_obs_pt = A[2] * x1_obs_k + A[3] * x2_obs_k + B[1] * u_k_1
-			+ Ke[1] * erro_obs;
+
 
 	//HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6); // Finaliza medição de tempo de execução
 
