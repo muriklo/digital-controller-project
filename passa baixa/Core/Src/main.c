@@ -64,25 +64,24 @@ const float Kc[2] =
 { 39.6464f, 1503575.2585f };
 
 // ---- VARIÁVEIS GLOBAIS DO CONTROLADOR ----
-volatile float g_reference_r = 1.0f;
-volatile float g_control_u = 0.0f;
+volatile float g_control_u;
 
 // Estados do Observador/Controlador
-volatile float x1_obs = 0.0f;    // V_C1 estimado
-volatile float x2_obs = 0.0f;    // i_C1 estimado
-volatile float x_int = 0.0f;     // Estado do integrador
-volatile float u_prev = 0.0f;    // Último sinal de controle (u[k-1])
+volatile float x1_obs;    // V_C1 estimado
+volatile float x2_obs;    // i_C1 estimado
+volatile float x_int;     // Estado do integrador
+volatile float u_prev;    // Último sinal de controle (u[k-1])
 
 // Derivadas dos estados (calculadas para a próxima iteração)
-static float dx1 = 0.0f;
-static float dx2 = 0.0f;
+static float dx1;
+static float dx2;
 
 // Erro de rastreamento (usado no passo seguinte pelo integrador)
-static float erro = 0.0f;
+static float erro;
 
 // Variáveis para leitura do ADC
 uint16_t adc_raw_y;
-float y_medido = 0.0f;
+float y_medido;
 
 /* USER CODE END PV */
 
@@ -98,7 +97,6 @@ void Control_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 static uint32_t sample_count = 0;
-static uint32_t control_counter = 0;
 float r_k = 1.0f;
 
 int32_t pwm_duty;
@@ -108,7 +106,6 @@ int32_t pwm_duty;
  */
 void Control_Init(void)
 {
-	g_reference_r = 1.0f;
 	g_control_u = 0.0f;
 	u_prev = 0.0f;
 
@@ -120,7 +117,6 @@ void Control_Init(void)
 	dx2 = 0.0f;
 	erro = 0.0f;
 
-	control_counter = 0;
 	sample_count = 0;
 	r_k = 1.0f; // Valor inicial da referência
 }
@@ -133,9 +129,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
 	if (htim->Instance != TIM3)
 		return;
-
-
-
 	// --- PASSO 1: LEITURA DO SENSOR (y_k) ---
 	HAL_ADC_Start(&hadc1);
 	if (HAL_ADC_PollForConversion(&hadc1, 1) == HAL_OK)
@@ -147,7 +140,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 	// --- PASSO 2: DEFINIÇÃO DA REFERÊNCIA (r_k) ---
 	// Lógica para alternar a referência
-	// Aprox. 200ms (66 * 3ms) para subir e mais 200ms para descer
+	// Aprox. 200ms
 	if (sample_count == 2000)
 	{
 		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
@@ -162,7 +155,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	sample_count++;
 
 	// --- PASSO 3: CÁLCULO DO CONTROLADOR ---
-	//HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6); // Pino para medir tempo de execução
 
 	// 1. Atualiza o estado do integrador com o erro da iteração ANTERIOR
 	x_int += T_SAMPLE * erro;
@@ -187,8 +179,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	// 7. Calcula as derivadas dos estados para a PRÓXIMA iteração
 	dx1 = A[0] * x1_obs + A[1] * x2_obs + B[0] * u_prev + Ke[0] * obs_erro;
 	dx2 = A[2] * x1_obs + A[3] * x2_obs + B[1] * u_prev + Ke[1] * obs_erro;
-
-	//HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6); // Finaliza medição de tempo
 
 	// --- PASSO 4: APLICAÇÃO DO SINAL DE CONTROLE ---
 	float u_mapped = g_control_u;
