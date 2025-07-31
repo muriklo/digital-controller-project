@@ -10,6 +10,9 @@
  * é executada dentro da interrupção do TIM3, que ocorre a 10kHz. Um contador
  * interno faz com que o algoritmo de controle seja executado a cada 3ms (~333Hz).
  *
+ * O código abaixo foi atualizado para refletir a lógica e os parâmetros do
+ * exemplo em Mbed OS fornecido.
+ *
  ******************************************************************************
  */
 /* USER CODE END Header */
@@ -28,9 +31,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-// Define os limites do sinal de controle (PWM duty cycle)
-#define PWM_MIN 	31
-#define PWM_MAX 	46
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -43,13 +43,12 @@ ADC_HandleTypeDef hadc1;
 TIM_HandleTypeDef htim3;
 
 /* USER CODE BEGIN PV */
-// --- COEFICIENTES E ESTADOS DO CONTROLADOR ---
-// Matrizes
-const float R1 = 46000.0f;
-const float R2 = 18000.0f;
-const float C1 = 100e-9f;
-const float C2 = 680e-9f;
+// --- COEFICIENTES E ESTADOS DO CONTROLADOR (BASEADO NO CÓDIGO MBED) ---
+// Período de amostragem em segundos (do código Mbed)
+const float T_SAMPLE = 0.0001f;
+const float VREF_VOLTS = 3.3f;
 
+// Matrizes do observador (valores do código Mbed)
 const float A[4] =
 { 0.0f, 1e7f, -1.7761e-3f, -1.1367e2f };
 
@@ -64,44 +63,25 @@ const float Ki = 9045.3275f; // valor do integrador, calculado no MATLAB
 const float Kc[2] =
 { 39.6464f, 1503575.2585f };
 
-static float erro_inst = 0.0f;
-
-// --- VARI�?VEIS GLOBAIS DO CONTROLADOR ---
-// 'volatile' para garantir que o compilador não otimize o acesso entre main e ISR
+// ---- VARIÁVEIS GLOBAIS DO CONTROLADOR ----
 volatile float g_reference_r = 1.0f;
-volatile float g_output_y = 0.0f;
 volatile float g_control_u = 0.0f;
-volatile float x_integrador = 0.0f;
 
-// Período de amostragem em segundos (3ms = 0.003s)
-const float T_SAMPLE = 0.0001f; //
+// Estados do Observador/Controlador
+volatile float x1_obs = 0.0f;    // V_C1 estimado
+volatile float x2_obs = 0.0f;    // i_C1 estimado
+volatile float x_int = 0.0f;     // Estado do integrador
+volatile float u_prev = 0.0f;    // Último sinal de controle (u[k-1])
 
-// Variáveis de estado estimadas pelo observador
-static float x1_obs_k = 0.0f;  // vC1 estimado no instante k
-static float x2_obs_k = 0.0f;  // iC1 estimado no instante k
+// Derivadas dos estados (calculadas para a próxima iteração)
+static float dx1 = 0.0f;
+static float dx2 = 0.0f;
 
-// Variáveis de estado estimadas no instante anterior
-static float x1_obs_k_1 = 0.0f;
-static float x2_obs_k_1 = 0.0f;
+// Erro de rastreamento (usado no passo seguinte pelo integrador)
+static float erro = 0.0f;
 
-// Derivadas dos estados estimados (usadas na integração Euler)
-static float x1_obs_pt = 0.0f;
-static float x2_obs_pt = 0.0f;
-static float x1_pt;
-static float x2_pt;
-
-// Saída estimada do observador
-static float y_obs_k = 0.0f;
-float erro_obs;
-float zeta;
-float zeta_pt;
-
-// Valor da entrada (u) da planta no instante anterior (para o observador)
-static float u_k_1 = 0.0f;
-
-// Variáveis para leitura dos canais do ADC1
+// Variáveis para leitura do ADC
 uint16_t adc_raw_y;
-
 float y_medido = 0.0f;
 
 /* USER CODE END PV */
@@ -113,7 +93,6 @@ static void MX_TIM3_Init(void);
 static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
 void Control_Init(void);
-//void Control_Update(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -129,30 +108,18 @@ int32_t pwm_duty;
  */
 void Control_Init(void)
 {
-	// Variáveis de saída e controle (para garantir estado inicial conhecido)
-	g_reference_r = 0.0f;
-	g_output_y = 0.0f;
+	g_reference_r = 1.0f;
 	g_control_u = 0.0f;
-	u_k_1 = 0.0f; // Inicializa a ação de controle anterior
-	zeta = 0.0f;
-	zeta_pt = 0.0f;
+	u_prev = 0.0f;
 
-	// Variáveis de estado estimadas do observador
-	x1_pt = 0.0f;
-	x2_pt = 0.0f;
-	x1_obs_k = 0.0f;
-	x2_obs_k = 0.0f;
-	x1_obs_k_1 = 0.0f;
-	x2_obs_k_1 = 0.0f;
+	x1_obs = 0.0f;
+	x2_obs = 0.0f;
+	x_int = 0.0f;
 
-	// Derivadas dos estados estimados
-	x1_obs_pt = 0.0f;
-	x2_obs_pt = B[1];
+	dx1 = 0.0f;
+	dx2 = 0.0f;
+	erro = 0.0f;
 
-	// Saída estimada do observador
-	y_obs_k = 0.0f;
-
-	// Reinicia o contador de amostragem
 	control_counter = 0;
 	sample_count = 0;
 	r_k = 1.0f; // Valor inicial da referência
@@ -160,38 +127,33 @@ void Control_Init(void)
 
 /**
  * @brief  Callback da interrupção do Timer. Ocorre a cada 100us (10kHz).
- * @note   Esta função agora contém toda a lógica de controle em tempo real.
+ * @note   Esta função contém a lógica de controle em tempo real.
  */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
 	if (htim->Instance != TIM3)
 		return;
 
-	// --- PASSO 1: LEITURA DO SENSOR (ENTRADA y_k) ---
-	control_counter++;
-	if (control_counter < 30)
-	{ // Executa o controle a cada 3ms (333 Hz), próximo do projeto.
-		return;
-	}
-	control_counter = 0; // Reseta o contador
 
-	// Converte o valor do ADC (0-4095) para Volts (0-3.3V)
+
+	// --- PASSO 1: LEITURA DO SENSOR (y_k) ---
 	HAL_ADC_Start(&hadc1);
-	if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK)
+	if (HAL_ADC_PollForConversion(&hadc1, 1) == HAL_OK)
 	{
-		adc_raw_y = HAL_ADC_GetValue(&hadc1); // canal 0
-		y_medido = adc_raw_y * (3.3f / 4095.0f); // Vc1 = y
+		adc_raw_y = HAL_ADC_GetValue(&hadc1);
+		y_medido = adc_raw_y * (VREF_VOLTS / 4095.0f);
 	}
 	HAL_ADC_Stop(&hadc1);
 
-	// --- PASSO 2: DEFINIÇÃO DA REFERÊNCIA (ENTRADA r_k) ---
-
-	if (sample_count == 33) // aprox. 100ms
+	// --- PASSO 2: DEFINIÇÃO DA REFERÊNCIA (r_k) ---
+	// Lógica para alternar a referência
+	// Aprox. 200ms (66 * 3ms) para subir e mais 200ms para descer
+	if (sample_count == 2000)
 	{
-		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5); // Atualiza pino A5 para HIGH (para trigger do osciloscópio
+		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
 		r_k = 1.5f;
 	}
-	else if (sample_count >= 66)
+	else if (sample_count >= 4000)
 	{
 		r_k = 1.0f;
 		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
@@ -199,54 +161,54 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	}
 	sample_count++;
 
-	// --- PASSO 3: C�?LCULO DO CONTROLADOR ---
-	//HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6); // pino para calcular tempo de execução dos cálculos
+	// --- PASSO 3: CÁLCULO DO CONTROLADOR ---
+	//HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6); // Pino para medir tempo de execução
 
-	zeta += T_SAMPLE * zeta_pt;
+	// 1. Atualiza o estado do integrador com o erro da iteração ANTERIOR
+	x_int += T_SAMPLE * erro;
 
-	x1_obs_k += T_SAMPLE * x1_pt;
-	x2_obs_k += T_SAMPLE * x2_pt;
+	// 2. Calcula o erro de rastreamento ATUAL (será usado na próxima iteração)
+	erro = r_k - y_medido;
 
-	y_obs_k = x1_obs_k;
+	// 3. Atualiza os estados do observador com as derivadas da iteração ANTERIOR
+	x1_obs += T_SAMPLE * dx1;
+	x2_obs += T_SAMPLE * dx2;
 
-	x1_pt = A[0] * x1_obs_k + A[1] * x2_obs_k + B[0] * g_control_u;
-	x2_pt = A[2] * x1_obs_k + A[3] * x2_obs_k + B[1] * g_control_u;
+	// 4. Calcula o erro do observador
+	float y_obs = x1_obs;
+	float obs_erro = y_medido - y_obs;
 
-	erro_inst = y_medido - y_obs_k;
+	// 5. Calcula o sinal de controle com os estados ESTIMADOS e o integrador
+	g_control_u = -(Kc[0] * x1_obs + Kc[1] * x2_obs) + Ki * x_int;
 
-	g_control_u = -(Kc[0] * x1_obs_k + Kc[1] * x2_obs_k) + Ki * zeta;
+	// 6. Armazena o controle atual para usar no cálculo das próximas derivadas
+	u_prev = g_control_u;
 
-	x1_obs_pt = A[0] * x1_obs_k + A[1] * x2_obs_k + B[0] * g_control_u + Ke[0] * erro_inst;
-	x2_obs_pt = A[2] * x1_obs_k + A[3] * x2_obs_k + B[1] * g_control_u + Ke[1] * erro_inst;
+	// 7. Calcula as derivadas dos estados para a PRÓXIMA iteração
+	dx1 = A[0] * x1_obs + A[1] * x2_obs + B[0] * u_prev + Ke[0] * obs_erro;
+	dx2 = A[2] * x1_obs + A[3] * x2_obs + B[1] * u_prev + Ke[1] * obs_erro;
 
+	//HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6); // Finaliza medição de tempo
 
-	zeta_pt = r_k - y_obs_k;
-
-
-	u_k_1 = g_control_u;
-
-
-
-	//HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6); // Finaliza medição de tempo de execução
-
+	// --- PASSO 4: APLICAÇÃO DO SINAL DE CONTROLE ---
 	float u_mapped = g_control_u;
-	// Saturação (se u_k puder exceder 3.3V ou ser menor que 0V)
-	if (u_mapped >= 3.3f)
+
+	// 8. Saturação do sinal de controle
+	if (u_mapped > VREF_VOLTS)
 	{
-		u_mapped = 3.3f; // Limite superior da tensão de entrada da planta
+		u_mapped = VREF_VOLTS;
 	}
-	if (u_mapped <= 0.0f)
+	if (u_mapped < 0.0f)
 	{
-		u_mapped = 0.0f; // Limite inferior (se a planta só aceita tensão positiva)
+		u_mapped = 0.0f;
 	}
 
-	pwm_duty = (int32_t) ((u_mapped / 3.3f) * (100)); // Mapeia para o período do PWM (ARR)
+	// 9. Mapeia a tensão (0-3.3V) para o duty cycle do PWM (0-100)
+	pwm_duty = (int32_t) ((u_mapped / VREF_VOLTS) * 100);
 
-	// Atualiza o duty cycle do PWM
+	// 10. Atualiza o duty cycle do PWM
 	TIM3->CCR2 = pwm_duty;
-
 }
-
 /* USER CODE END 0 */
 
 /**
@@ -255,7 +217,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
  */
 int main(void)
 {
-
 	/* USER CODE BEGIN 1 */
 	/* USER CODE END 1 */
 
@@ -265,7 +226,7 @@ int main(void)
 	HAL_Init();
 
 	/* USER CODE BEGIN Init */
-	/* USER CODE END Init */
+	/* USER END Init */
 
 	/* Configure the system clock */
 	SystemClock_Config();
@@ -282,33 +243,20 @@ int main(void)
 	// Inicializa as variáveis do controlador
 	Control_Init();
 
-	// Inicia a conversão contínua do ADC
-
-	// Inicia o PWM com interrupção. A interrupção irá guiar todo o controle.
+	// Inicia o PWM e o Timer que dispara a interrupção de controle
 	HAL_TIM_Base_Start_IT(&htim3);
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
-	HAL_ADC_Start(&hadc1);
+	HAL_ADC_Start(&hadc1); // Inicia o ADC
+
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
 	while (1)
 	{
-
-		//HAL_ADC_PollForConversion(&hadc1, 1);
-
-		// O loop principal agora é usado para tarefas de baixa prioridade, como a comunicação.
-		/*		if (send_data_flag)
-		 {
-		 send_data_flag = 0; // Reseta a flag
-
-		 // Envia os dados do controlador via UART para depuração/plotagem
-		 sprintf(msg, "R:%.2f, Y:%.2f, U:%.2f\r\n", g_reference_r, g_output_y, g_control_u);
-		 HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-		 }
-		 */
-		// Pequeno delay para não sobrecarregar o processador com o loop while(1)
-		//	HAL_Delay(10);
+		// O loop principal pode ser usado para tarefas de baixa prioridade.
+		// A lógica de controle está na interrupção do TIM3.
+		HAL_Delay(100);
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
@@ -460,7 +408,7 @@ static void MX_TIM3_Init(void)
 		Error_Handler();
 	}
 	sConfigOC.OCMode = TIM_OCMODE_PWM1;
-	sConfigOC.Pulse = 31;
+	sConfigOC.Pulse = 0; // Inicia com 0% de duty cycle
 	sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
 	sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
 	if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
@@ -523,7 +471,7 @@ void Error_Handler(void)
 #ifdef  USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
+  * where the assert_param error has occurred.
   * @param  file: pointer to the source file name
   * @param  line: assert_param error line source number
   * @retval None
